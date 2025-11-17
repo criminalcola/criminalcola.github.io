@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>KOMU Bars Clock</title>
+  <title>KOMU Studio Display</title>
   <style>
     html, body {
       margin: 0;
@@ -11,27 +11,26 @@
       height: 100%;
       overflow: hidden;
       background: black;
-      cursor: none; /* Hide cursor when over the page */
+      cursor: none;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
-    .container {
-      position: relative;
+    .layer {
+      position: absolute;
+      inset: 0;
       width: 100%;
       height: 100%;
+      display: none;
     }
 
-    video {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
+    #barsLayer video {
+      width: 100%;
+      height: 100%;
       object-fit: cover;
     }
 
     .clock-overlay {
-      position: fixed;
+      position: absolute;
       left: 50%;
       bottom: 5%;
       transform: translateX(-50%);
@@ -39,35 +38,132 @@
       color: #ffffff;
       padding: 18px 32px;
       border-radius: 6px;
-      font-size: 3rem; /* ~33% larger */
+      font-size: 3rem; /* 33% larger than original */
       letter-spacing: 0.08em;
       text-align: center;
       box-shadow: 0 0 12px rgba(0, 0, 0, 0.7);
       white-space: nowrap;
     }
+
+    #slateLayer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      box-sizing: border-box;
+      text-align: center;
+    }
+
+    #slateText {
+      color: #ffffff;
+      font-size: 5vw;
+      line-height: 1.2;
+      word-wrap: break-word;
+    }
+
+    #countdownLayer {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: #ffffff;
+      padding: 2rem;
+      box-sizing: border-box;
+    }
+
+    #countdownTitle {
+      font-size: 4vw;
+      margin-bottom: 1rem;
+    }
+
+    #countdownTarget {
+      font-size: 2vw;
+      margin-bottom: 0.5rem;
+      opacity: 0.8;
+    }
+
+    #countdownTimeLeft {
+      font-size: 6vw;
+      letter-spacing: 0.08em;
+    }
+
+    /* Black layer is just a black background; no extra styling needed */
   </style>
 </head>
 <body>
-  <div class="container">
-    <!-- Video background -->
-    <video id="komuVideo" autoplay muted loop playsinline>
+  <!-- Bars mode -->
+  <div id="barsLayer" class="layer">
+    <video id="barsVideo" autoplay muted loop playsinline>
       <source src="KOMUBARS-V1.mp4" type="video/mp4" />
       Your browser does not support the video tag.
     </video>
-
-    <!-- Time overlay -->
-    <div id="clock" class="clock-overlay">--:--:-- CT</div>
+    <div id="barsClock" class="clock-overlay">--:--:-- CT</div>
   </div>
 
+  <!-- Slate mode -->
+  <div id="slateLayer" class="layer">
+    <div id="slateText"></div>
+  </div>
+
+  <!-- Countdown mode -->
+  <div id="countdownLayer" class="layer">
+    <div id="countdownTitle"></div>
+    <div id="countdownTarget"></div>
+    <div id="countdownTimeLeft"></div>
+  </div>
+
+  <!-- Black mode -->
+  <div id="blackLayer" class="layer"></div>
+
+  <!-- Optional cue sounds for countdown -->
+  <audio id="cue5" src="5minutes.wav" preload="auto"></audio>
+  <audio id="cue3" src="3minutes.wav" preload="auto"></audio>
+  <audio id="cue2" src="2minutes.wav" preload="auto"></audio>
+  <audio id="cue1" src="1minute.wav" preload="auto"></audio>
+  <audio id="cue30" src="30seconds.wav" preload="auto"></audio>
+
   <script>
+    /***********************
+     * Shared State Loader *
+     ***********************/
+    const STATE_KEY = "komuDisplayState";
+    const DEFAULT_STATE = {
+      mode: "bars",           // "bars" | "slate" | "countdown" | "black"
+      slateText: "",
+      countdownTitle: "",
+      countdownTargetMs: null // epoch ms (local wall clock)
+    };
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STATE_KEY);
+        if (!raw) return { ...DEFAULT_STATE };
+        return { ...DEFAULT_STATE, ...JSON.parse(raw) };
+      } catch (e) {
+        console.warn("Failed to parse display state, using defaults.", e);
+        return { ...DEFAULT_STATE };
+      }
+    }
+
+    let currentState = loadState();
+
+    /********************
+     * Time Sync (CT)   *
+     ********************/
     const TIMEZONE = "America/Chicago";
     const TIME_API_URL = "https://worldtimeapi.org/api/timezone/America/Chicago";
-    const DISPLAY_LAG_MS = 3000; // make clock 3 seconds slow
 
-    let timeOffsetMs = 0; // (serverTime - localTime) minus our intentional lag
+    // serverOffsetMs = serverCTTime - localTime
+    let serverOffsetMs = 0;
+    const BARS_DELAY_MS = 3000; // Bars clock is 3 seconds slow
 
-    function formatCentralTime(date) {
-      // Format as 24-hour HH:MM:SS CT
+    function getSyncedNow() {
+      // Returns a Date approximating current CT
+      return new Date(Date.now() + serverOffsetMs);
+    }
+
+    function formatCT(date) {
       return date.toLocaleTimeString("en-US", {
         hour12: false,
         hour: "2-digit",
@@ -77,45 +173,190 @@
       }) + " CT";
     }
 
-    function updateClock() {
-      const nowLocal = Date.now();
-      const syncedTime = new Date(nowLocal + timeOffsetMs);
-      const clockEl = document.getElementById("clock");
-      if (clockEl) {
-        clockEl.textContent = formatCentralTime(syncedTime);
-      }
-    }
-
     async function syncTime() {
       try {
-        const beforeFetch = Date.now();
-        const response = await fetch(TIME_API_URL, { cache: "no-store" });
-        const afterFetch = Date.now();
-
-        if (!response.ok) throw new Error("Time API error");
-
-        const data = await response.json();
-
-        // Example datetime: "2025-11-16T17:31:23.123456-06:00"
-        const serverDate = new Date(data.datetime);
-
-        // Approximate network latency compensation using midpoint
-        const midpointLocal = (beforeFetch + afterFetch) / 2;
-
-        // Offset so that display = serverTime - 3 seconds
-        timeOffsetMs = serverDate.getTime() - midpointLocal - DISPLAY_LAG_MS;
+        const before = Date.now();
+        const res = await fetch(TIME_API_URL, { cache: "no-store" });
+        const after = Date.now();
+        if (!res.ok) throw new Error("Time API error");
+        const data = await res.json();
+        const serverDate = new Date(data.datetime); // already CT
+        const midpoint = (before + after) / 2;
+        serverOffsetMs = serverDate.getTime() - midpoint;
       } catch (e) {
-        console.warn("Failed to sync with public time service. Falling back to local clock.", e);
-        // Fall back to local time, but still apply the 3-second lag
-        timeOffsetMs = -DISPLAY_LAG_MS;
+        console.warn("Time sync failed, falling back to local time.", e);
+        serverOffsetMs = 0;
       }
     }
+
+    /*****************
+     * Mode Handling *
+     *****************/
+    const barsLayer = document.getElementById("barsLayer");
+    const slateLayer = document.getElementById("slateLayer");
+    const countdownLayer = document.getElementById("countdownLayer");
+    const blackLayer = document.getElementById("blackLayer");
+
+    const barsClock = document.getElementById("barsClock");
+    const slateTextEl = document.getElementById("slateText");
+
+    const countdownTitleEl = document.getElementById("countdownTitle");
+    const countdownTargetEl = document.getElementById("countdownTarget");
+    const countdownTimeLeftEl = document.getElementById("countdownTimeLeft");
+
+    const cue5 = document.getElementById("cue5");
+    const cue3 = document.getElementById("cue3");
+    const cue2 = document.getElementById("cue2");
+    const cue1 = document.getElementById("cue1");
+    const cue30 = document.getElementById("cue30");
+
+    let cue5Played = false;
+    let cue3Played = false;
+    let cue2Played = false;
+    let cue1Played = false;
+    let cue30Played = false;
+
+    function resetCues() {
+      cue5Played = cue3Played = cue2Played = cue1Played = cue30Played = false;
+    }
+
+    function playCue(audioEl) {
+      if (!audioEl) return;
+      try {
+        const p = audioEl.play();
+        if (p && typeof p.then === "function") {
+          p.catch(() => {
+            // Autoplay may be blocked; ignore
+          });
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    function showOnly(layer) {
+      [barsLayer, slateLayer, countdownLayer, blackLayer].forEach(el => {
+        el.style.display = (el === layer) ? "flex" : "none";
+        if (el === barsLayer) {
+          // Bars layer uses block layout, not flex
+          el.style.display = (el === layer) ? "block" : "none";
+        }
+      });
+    }
+
+    function applyState(state) {
+      currentState = state;
+
+      switch (state.mode) {
+        case "bars":
+          showOnly(barsLayer);
+          resetCues();
+          break;
+
+        case "slate":
+          slateTextEl.textContent = state.slateText || "";
+          showOnly(slateLayer);
+          resetCues();
+          break;
+
+        case "countdown":
+          countdownTitleEl.textContent = state.countdownTitle || "";
+          if (state.countdownTargetMs != null) {
+            const targetDate = new Date(state.countdownTargetMs);
+            const targetStr = targetDate.toLocaleTimeString("en-US", {
+              hour12: false,
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+              timeZone: TIMEZONE
+            });
+            countdownTargetEl.textContent = "Target: " + targetStr + " CT";
+          } else {
+            countdownTargetEl.textContent = "Target: --:--:-- CT";
+          }
+          showOnly(countdownLayer);
+          resetCues();
+          break;
+
+        case "black":
+        default:
+          showOnly(blackLayer);
+          resetCues();
+          break;
+      }
+    }
+
+    /**********************
+     * Periodic Updates   *
+     **********************/
+    function formatHMS(totalSeconds) {
+      const s = Math.max(0, Math.floor(totalSeconds));
+      const hrs = String(Math.floor(s / 3600)).padStart(2, "0");
+      const mins = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+      const secs = String(s % 60).padStart(2, "0");
+      return `${hrs}:${mins}:${secs}`;
+    }
+
+    function tick() {
+      const nowCT = getSyncedNow();
+
+      // Bars clock (3 seconds slow)
+      if (currentState.mode === "bars" && barsClock) {
+        const barsTime = new Date(nowCT.getTime() - BARS_DELAY_MS);
+        barsClock.textContent = formatCT(barsTime);
+      }
+
+      // Countdown
+      if (currentState.mode === "countdown" && currentState.countdownTargetMs != null) {
+        const diffMs = currentState.countdownTargetMs - nowCT.getTime();
+        const diffSec = diffMs / 1000;
+        const clamped = Math.max(0, diffSec);
+        countdownTimeLeftEl.textContent = "Time left: " + formatHMS(clamped);
+
+        // Cue sounds (only once each)
+        if (diffSec <= 300 && !cue5Played && diffSec > 0) {
+          playCue(cue5);
+          cue5Played = true;
+        }
+        if (diffSec <= 180 && !cue3Played && diffSec > 0) {
+          playCue(cue3);
+          cue3Played = true;
+        }
+        if (diffSec <= 120 && !cue2Played && diffSec > 0) {
+          playCue(cue2);
+          cue2Played = true;
+        }
+        if (diffSec <= 60 && !cue1Played && diffSec > 0) {
+          playCue(cue1);
+          cue1Played = true;
+        }
+        if (diffSec <= 30 && !cue30Played && diffSec > 0) {
+          playCue(cue30);
+          cue30Played = true;
+        }
+      }
+    }
+
+    /*************************
+     * Listen for Admin Page *
+     *************************/
+    window.addEventListener("storage", (e) => {
+      if (e.key === STATE_KEY && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          applyState({ ...DEFAULT_STATE, ...parsed });
+        } catch (err) {
+          console.warn("Bad state from storage event", err);
+        }
+      }
+    });
 
     (async function init() {
       await syncTime();
-      updateClock();
-      setInterval(updateClock, 200);
-      // Optional: re-sync periodically (e.g., every 5 minutes)
+      applyState(currentState);
+
+      setInterval(tick, 200);
+      // Re-sync time every 5 minutes
       setInterval(syncTime, 5 * 60 * 1000);
     })();
   </script>

@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>KOMU Studio Admin</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111;
+      color: #eee;
+    }
+
+    .admin-container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 1.5rem;
+      box-sizing: border-box;
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 1.6rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      font-size: 0.9rem;
+      color: #aaa;
+      margin-bottom: 1.25rem;
+    }
+
+    fieldset {
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 0.75rem 1rem 0.9rem;
+      margin-bottom: 1rem;
+    }
+
+    legend {
+      padding: 0 0.3rem;
+      font-size: 0.9rem;
+      color: #bbb;
+    }
+
+    label {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin-bottom: 0.3rem;
+      cursor: pointer;
+    }
+
+    input[type="radio"] {
+      cursor: pointer;
+    }
+
+    textarea,
+    input[type="text"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0.4rem 0.5rem;
+      border-radius: 4px;
+      border: 1px solid #444;
+      background: #222;
+      color: #eee;
+      resize: vertical;
+      margin-top: 0.35rem;
+    }
+
+    textarea {
+      min-height: 3.5rem;
+    }
+
+    .small {
+      font-size: 0.8rem;
+      color: #aaa;
+    }
+
+    .quick-buttons {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+
+    button {
+      border: none;
+      border-radius: 4px;
+      padding: 0.4rem 0.75rem;
+      cursor: pointer;
+      background: #2c5aff;
+      color: #fff;
+      font-size: 0.9rem;
+    }
+
+    button.secondary {
+      background: #444;
+    }
+
+    button:hover {
+      filter: brightness(1.05);
+    }
+
+    .countdown-inputs {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 0.5rem;
+      margin-top: 0.35rem;
+    }
+
+    .status-box {
+      margin-top: 1rem;
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      background: #181818;
+      border: 1px solid #333;
+      font-size: 0.9rem;
+    }
+
+    .status-label {
+      font-weight: 600;
+      margin-right: 0.25rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="admin-container">
+    <h1>KOMU Studio Admin</h1>
+    <div class="subtitle">
+      Controls what <strong>index.html</strong> is displaying. Keep both pages open in separate tabs/windows.
+    </div>
+
+    <fieldset>
+      <legend>Mode</legend>
+      <label>
+        <input type="radio" name="mode" value="bars" checked />
+        Bars (color bars + CT clock, 3 seconds slow)
+      </label>
+      <label>
+        <input type="radio" name="mode" value="slate" />
+        Slate (black screen with large text)
+      </label>
+      <label>
+        <input type="radio" name="mode" value="countdown" />
+        Countdown (title + target time + time left + cues)
+      </label>
+      <label>
+        <input type="radio" name="mode" value="black" />
+        Black (blackout & stop countdown)
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Slate Settings</legend>
+      <label class="small">Slate text</label>
+      <textarea id="slateTextInput" placeholder="Enter slate text here..."></textarea>
+
+      <div class="small" style="margin-top:0.5rem;">Quick recalls (auto-slate with current date):</div>
+      <div class="quick-buttons">
+        <button type="button" class="secondary" data-showtime="5">5 PM - CUED</button>
+        <button type="button" class="secondary" data-showtime="6">6 PM - CUED</button>
+        <button type="button" class="secondary" data-showtime="9">9 PM - CUED</button>
+        <button type="button" class="secondary" data-showtime="10">10 PM - CUED</button>
+      </div>
+      <div class="small" style="margin-top:0.25rem;">
+        Each quick recall immediately switches index.html into Slate mode with the corresponding text.
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Countdown Settings</legend>
+      <div class="small">
+        Specify title and target time (24h, HH:MM:SS). If the time is earlier than now, it will count down to that time <em>tomorrow</em>.
+      </div>
+      <div class="countdown-inputs">
+        <div>
+          <label class="small">Countdown title</label>
+          <input type="text" id="countdownTitleInput" placeholder="e.g., 'KOMU 8 News at 10 PM'" />
+        </div>
+        <div>
+          <label class="small">Target time (HH:MM:SS)</label>
+          <input type="text" id="countdownTimeInput" placeholder="22:00:00" />
+        </div>
+      </div>
+    </fieldset>
+
+    <button type="button" id="applyBtn">Apply / Submit</button>
+
+    <div class="status-box" id="statusBox">
+      <span class="status-label">Current status:</span>
+      <span id="statusText">Not yet applied.</span>
+    </div>
+  </div>
+
+  <script>
+    const STATE_KEY = "komuDisplayState";
+    const DEFAULT_STATE = {
+      mode: "bars",
+      slateText: "",
+      countdownTitle: "",
+      countdownTargetMs: null
+    };
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STATE_KEY);
+        if (!raw) return { ...DEFAULT_STATE };
+        return { ...DEFAULT_STATE, ...JSON.parse(raw) };
+      } catch {
+        return { ...DEFAULT_STATE };
+      }
+    }
+
+    function saveState(state) {
+      localStorage.setItem(STATE_KEY, JSON.stringify(state));
+    }
+
+    function getSelectedMode() {
+      const radios = document.querySelectorAll('input[name="mode"]');
+      for (const r of radios) {
+        if (r.checked) return r.value;
+      }
+      return "bars";
+    }
+
+    function setSelectedMode(mode) {
+      const radios = document.querySelectorAll('input[name="mode"]');
+      radios.forEach(r => {
+        r.checked = (r.value === mode);
+      });
+    }
+
+    function formatDateLong(d) {
+      return d.toLocaleDateString("en-US", {
+        month: "long",
+        day: "2-digit",
+        year: "numeric"
+      });
+    }
+
+    function updateStatus(state) {
+      const statusText = document.getElementById("statusText");
+      let msg = "";
+
+      switch (state.mode) {
+        case "bars":
+          msg = "Bars mode active (color bars + CT clock, 3 seconds slow).";
+          break;
+        case "slate":
+          msg = "Slate mode active: \"" + (state.slateText || "").replace(/\s+/g, " ").trim() + "\"";
+          break;
+        case "countdown":
+          msg = "Countdown mode active: \"" + (state.countdownTitle || "") + "\"";
+          if (state.countdownTargetMs != null) {
+            const t = new Date(state.countdownTargetMs);
+            const tStr = t.toLocaleTimeString("en-US", {
+              hour12: false,
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit"
+            });
+            msg += " (Target " + tStr + ")";
+          }
+          break;
+        case "black":
+        default:
+          msg = "Black mode active (output blacked out, countdown stopped).";
+          break;
+      }
+
+      statusText.textContent = msg;
+    }
+
+    function applyFromForm() {
+      const state = loadState();
+      const mode = getSelectedMode();
+      state.mode = mode;
+
+      if (mode === "slate") {
+        const text = document.getElementById("slateTextInput").value || "";
+        state.slateText = text;
+      } else if (mode === "countdown") {
+        const title = document.getElementById("countdownTitleInput").value || "";
+        const timeStr = document.getElementById("countdownTimeInput").value || "";
+        const parts = timeStr.split(":").map(p => parseInt(p, 10));
+
+        if (parts.length !== 3 || parts.some(isNaN)) {
+          alert("Please enter target time as HH:MM:SS (24-hour).");
+          return;
+        }
+
+        let [hh, mm, ss] = parts;
+        if (hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 59) {
+          alert("Invalid time. Use HH:MM:SS (24-hour).");
+          return;
+        }
+
+        const now = new Date();
+        const target = new Date(now);
+        target.setHours(hh, mm, ss, 0);
+        if (target.getTime() <= now.getTime()) {
+          // If already passed for today, use tomorrow
+          target.setDate(target.getDate() + 1);
+        }
+
+        state.countdownTitle = title;
+        state.countdownTargetMs = target.getTime();
+      } else {
+        // For bars or black, clear specialized fields if you want
+        // (Not strictly necessary, but keeps state clean)
+      }
+
+      saveState(state);
+      updateStatus(state);
+    }
+
+    function applyQuickSlate(hourLabel) {
+      const now = new Date();
+      const dateStr = formatDateLong(now);
+      const text = `KOMU 8 News at ${hourLabel} PM (${dateStr}) - CUED`;
+
+      // Force slate mode + text
+      const state = loadState();
+      state.mode = "slate";
+      state.slateText = text;
+
+      saveState(state);
+
+      // Update UI to match
+      document.getElementById("slateTextInput").value = text;
+      setSelectedMode("slate");
+      updateStatus(state);
+    }
+
+    // Wire up quick buttons
+    document.querySelectorAll(".quick-buttons button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const hour = btn.getAttribute("data-showtime");
+        applyQuickSlate(hour);
+      });
+    });
+
+    // Apply button
+    document.getElementById("applyBtn").addEventListener("click", applyFromForm);
+
+    // Initialize status from stored state
+    (function init() {
+      const state = loadState();
+      setSelectedMode(state.mode);
+      document.getElementById("slateTextInput").value = state.slateText || "";
+      document.getElementById("countdownTitleInput").value = state.countdownTitle || "";
+      if (state.countdownTargetMs != null) {
+        const t = new Date(state.countdownTargetMs);
+        const hh = String(t.getHours()).padStart(2, "0");
+        const mm = String(t.getMinutes()).padStart(2, "0");
+        const ss = String(t.getSeconds()).padStart(2, "0");
+        document.getElementById("countdownTimeInput").value = `${hh}:${mm}:${ss}`;
+      }
+      updateStatus(state);
+    })();
+  </script>
+</body>
+</html>
