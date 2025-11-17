@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>KOMU Bars Clock</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: black;
+      cursor: none; /* Hide cursor when over the page */
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+    }
+
+    .clock-overlay {
+      position: fixed;
+      left: 50%;
+      bottom: 5%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.9);
+      color: #ffffff;
+      padding: 18px 32px;
+      border-radius: 6px;
+      font-size: 3rem; /* ~33% larger */
+      letter-spacing: 0.08em;
+      text-align: center;
+      box-shadow: 0 0 12px rgba(0, 0, 0, 0.7);
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Video background -->
+    <video id="komuVideo" autoplay muted loop playsinline>
+      <source src="KOMUBARS-V1.mp4" type="video/mp4" />
+      Your browser does not support the video tag.
+    </video>
+
+    <!-- Time overlay -->
+    <div id="clock" class="clock-overlay">--:--:-- CT</div>
+  </div>
+
+  <script>
+    const TIMEZONE = "America/Chicago";
+    const TIME_API_URL = "https://worldtimeapi.org/api/timezone/America/Chicago";
+    const DISPLAY_LAG_MS = 3000; // make clock 3 seconds slow
+
+    let timeOffsetMs = 0; // (serverTime - localTime) minus our intentional lag
+
+    function formatCentralTime(date) {
+      // Format as 24-hour HH:MM:SS CT
+      return date.toLocaleTimeString("en-US", {
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        timeZone: TIMEZONE
+      }) + " CT";
+    }
+
+    function updateClock() {
+      const nowLocal = Date.now();
+      const syncedTime = new Date(nowLocal + timeOffsetMs);
+      const clockEl = document.getElementById("clock");
+      if (clockEl) {
+        clockEl.textContent = formatCentralTime(syncedTime);
+      }
+    }
+
+    async function syncTime() {
+      try {
+        const beforeFetch = Date.now();
+        const response = await fetch(TIME_API_URL, { cache: "no-store" });
+        const afterFetch = Date.now();
+
+        if (!response.ok) throw new Error("Time API error");
+
+        const data = await response.json();
+
+        // Example datetime: "2025-11-16T17:31:23.123456-06:00"
+        const serverDate = new Date(data.datetime);
+
+        // Approximate network latency compensation using midpoint
+        const midpointLocal = (beforeFetch + afterFetch) / 2;
+
+        // Offset so that display = serverTime - 3 seconds
+        timeOffsetMs = serverDate.getTime() - midpointLocal - DISPLAY_LAG_MS;
+      } catch (e) {
+        console.warn("Failed to sync with public time service. Falling back to local clock.", e);
+        // Fall back to local time, but still apply the 3-second lag
+        timeOffsetMs = -DISPLAY_LAG_MS;
+      }
+    }
+
+    (async function init() {
+      await syncTime();
+      updateClock();
+      setInterval(updateClock, 200);
+      // Optional: re-sync periodically (e.g., every 5 minutes)
+      setInterval(syncTime, 5 * 60 * 1000);
+    })();
+  </script>
+</body>
+</html>
