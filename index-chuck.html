@@ -14,7 +14,7 @@
         }
 
         body {
-            cursor: none; /* Hide cursor */
+            cursor: none;
         }
 
         #bg-video {
@@ -24,10 +24,9 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
-            z-index: 0; /* Make sure video is behind overlays but still visible */
+            z-index: 0;
         }
 
-        /* Only visible if autoplay fails */
         #play-btn {
             position: absolute;
             top: 0;
@@ -43,25 +42,37 @@
             font-size: 2rem;
             z-index: 10;
             cursor: pointer;
-            display: none; /* Hidden by default */
+            display: none;
         }
 
-        /* Clock bar: about 1/8 of the screen height at bottom */
+        /* Time/Date bar (vertical stack) */
         #time-bar {
             position: absolute;
             bottom: 0;
             left: 0;
             width: 100%;
-            height: 12.5vh;      /* ~1/8 of screen height */
+            height: 12.5vh;
             background: black;
             color: red;
             font-family: monospace;
-            font-size: 4vh;       /* scales with viewport */
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             z-index: 20;
             letter-spacing: 2px;
+            text-align: center;
+        }
+
+        #time-text {
+            font-size: 4.4vh;   /* ~10% increase */
+            line-height: 1;
+        }
+
+        #date-text {
+            font-size: 2.8vh;
+            margin-top: 0.5vh;
+            letter-spacing: 3px;
         }
     </style>
 </head>
@@ -73,34 +84,32 @@
         <source src="KOMUBARS-V1.mp4" type="video/mp4">
     </video>
 
-    <!-- Time Display -->
-    <div id="time-bar">--:--:--.---</div>
+    <!-- Time + Date Container -->
+    <div id="time-bar">
+        <div id="time-text">--:--:--.---</div>
+        <div id="date-text">LOADING DATE...</div>
+    </div>
 
 <script>
     const video = document.getElementById('bg-video');
     const btn = document.getElementById('play-btn');
-    const timeBar = document.getElementById('time-bar');
+    const timeText = document.getElementById('time-text');
+    const dateText = document.getElementById('date-text');
 
-    let offsetMS = 0; // Difference between API time and PC time
+    let offsetMS = 0;
 
     // ---------- VIDEO AUTOPLAY HANDLING ----------
-    // Try to play immediately (in addition to autoplay attribute)
     const promise = video.play();
     if (promise !== undefined) {
         promise.catch(error => {
-            console.log("Autoplay prevented. Waiting for user interaction.");
             btn.style.display = 'flex';
-            document.body.style.cursor = 'auto'; // Show cursor so they can click
+            document.body.style.cursor = 'auto';
         });
     }
 
     function forcePlay() {
         video.play();
         btn.style.display = 'none';
-        bodyHideCursor();
-    }
-
-    function bodyHideCursor() {
         document.body.style.cursor = 'none';
     }
 
@@ -110,16 +119,11 @@
             const response = await fetch("https://worldtimeapi.org/api/timezone/America/Chicago");
             const data = await response.json();
 
-            // UNIX time from API (ms), plus 3 seconds
             const apiTime = (data.unixtime * 1000) + 3000;
-
             const pcTime = Date.now();
             offsetMS = apiTime - pcTime;
-
-            console.log("Time synced. Offset:", offsetMS, "ms");
         } catch (e) {
-            console.warn("Time API failed. Using PC clock.");
-            // offsetMS remains whatever it was (0 if never synced)
+            console.warn("Time sync failed, using PC clock.");
         }
     }
 
@@ -131,19 +135,27 @@
         return `${hh}:${mm}:${ss}.${ms}`;
     }
 
-    function updateClock() {
-        const now = new Date(Date.now() + offsetMS);
-        timeBar.textContent = formatTime(now);
+    function formatDate(date) {
+        const days = ["SUNDAY","MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY"];
+        const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+
+        const dayName = days[date.getDay()];
+        const monthName = months[date.getMonth()];
+        const dayNum = String(date.getDate()).padStart(2, '0');
+        const year = date.getFullYear();
+
+        return `${dayName} ${monthName} ${dayNum} ${year}`;
     }
 
-    // Initial sync
+    function updateClock() {
+        const now = new Date(Date.now() + offsetMS);
+        timeText.textContent = formatTime(now);
+        dateText.textContent = formatDate(now);
+    }
+
     syncTime();
-
-    // Resync every 15 minutes
     setInterval(syncTime, 15 * 60 * 1000);
-
-    // Update clock with millisecond precision (about 60fps)
-    setInterval(updateClock, 16);
+    setInterval(updateClock, 16); // ~60 FPS
 </script>
 
 </body>
