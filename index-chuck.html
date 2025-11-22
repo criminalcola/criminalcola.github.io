@@ -45,13 +45,13 @@
             display: none;
         }
 
-        /* Time/Date bar (vertical stack) */
+        /* Time/Date bar */
         #time-bar {
             position: absolute;
             bottom: 0;
             left: 0;
             width: 100%;
-            height: 15vh;              /* a bit taller to ensure both lines show */
+            height: 15vh;
             background: black;
             color: red;
             font-family: monospace;
@@ -65,7 +65,7 @@
         }
 
         #time-text {
-            font-size: 5vh;            /* big, readable timecode */
+            font-size: 5vh;
             line-height: 1;
         }
 
@@ -84,7 +84,6 @@
         <source src="KOMUBARS-V1.mp4" type="video/mp4">
     </video>
 
-    <!-- Time + Date Container -->
     <div id="time-bar">
         <div id="time-text">--:--:--:--</div>
         <div id="date-text">LOADING DATE...</div>
@@ -98,16 +97,14 @@
 
     let offsetMS = 0;
 
-    // Use NTSC-style frame rate (~29.97 fps)
     const FRAME_RATE = 29.97;
-    const FRAME_DURATION = 1000 / FRAME_RATE;       // ms per frame (~33.366)
-    const TIMER_INTERVAL = Math.round(FRAME_DURATION); // interval for setInterval (~33ms)
+    const FRAME_DURATION = 1000 / FRAME_RATE;
+    const TIMER_INTERVAL = Math.round(FRAME_DURATION);
 
-    // ---------- VIDEO AUTOPLAY HANDLING ----------
+    // ---------- VIDEO AUTOPLAY ----------
     const playPromise = video.play();
     if (playPromise !== undefined) {
-        playPromise.catch(error => {
-            console.log("Autoplay prevented. Waiting for user interaction.");
+        playPromise.catch(() => {
             btn.style.display = 'flex';
             document.body.style.cursor = 'auto';
         });
@@ -119,21 +116,23 @@
         document.body.style.cursor = 'none';
     }
 
-    // ---------- TIME SYNC ----------
+    // ---------- TIME SYNC (subtract 3 seconds) ----------
     async function syncTime() {
         try {
             const response = await fetch("https://worldtimeapi.org/api/timezone/America/Chicago");
             const data = await response.json();
 
-            // API unix time (seconds) -> ms, plus 3-second offset
+            // SUBTRACT 3 SECONDS INSTEAD OF ADDING
             const apiTime = (data.unixtime * 1000) - 3000;
+
             const pcTime = Date.now();
 
             offsetMS = apiTime - pcTime;
             console.log("Time synced. Offset (ms):", offsetMS);
         } catch (e) {
-            console.warn("Time sync failed, using PC clock only.", e);
-            // offsetMS stays as-is (0 if never synced)
+            console.warn("Time sync failed, using PC clock with -3s offset.");
+            // fallback: subtract 3 seconds from PC time
+            offsetMS = -3000;
         }
     }
 
@@ -143,10 +142,9 @@
         const ss = String(date.getSeconds()).padStart(2, '0');
 
         const ms = date.getMilliseconds();
-        const frame = Math.floor(ms / FRAME_DURATION);  // 0–29 for ~29.97 fps
+        const frame = Math.floor(ms / FRAME_DURATION);
         const ff = String(frame).padStart(2, '0');
 
-        // Standard TV-style timecode: HH:MM:SS:FF
         return `${hh}:${mm}:${ss}:${ff}`;
     }
 
@@ -159,7 +157,6 @@
         const dayNum = String(date.getDate()).padStart(2, '0');
         const year = date.getFullYear();
 
-        // Example: SATURDAY NOV 22 2025
         return `${dayName} ${monthName} ${dayNum} ${year}`;
     }
 
@@ -169,13 +166,12 @@
         dateText.textContent = formatDate(now);
     }
 
-    // Initial sync + updates
+    // Initial sync & looping updates
     syncTime();
-    setInterval(syncTime, 15 * 60 * 1000);  // re-sync every 15 minutes
+    setInterval(syncTime, 15 * 60 * 1000);
     setInterval(updateClock, TIMER_INTERVAL);
 
 </script>
 
 </body>
 </html>
-
